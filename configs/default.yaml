@@ -21,21 +21,22 @@
   "task": {
     "home_pose": [0.2, 0.4, 0.2, 0.0],
     "target_sampling": {
-      "x": [0.8, 3.0],
-      "y": [0.8, 2.0],
+      "x": [2.0, 3.0],
+      "y": [0.8, 1.4],
       "radius": [0.4, 3.6]
     },
     "ground_y": 0.0,
     "success_tolerance": 0.08,
-    "success_hold_steps": 10
+    "success_hold_steps": 5
   },
   "reward": {
     "progress_weight": 5.0,
-    "torque_weight": 0.01,
-    "motion_weight": 0.001,
-    "smoothness_weight": 0.01,
+    "distance_weight": 0.5,
+    "torque_weight": 0.0,
+    "motion_weight": 0.0,
+    "smoothness_weight": 0.002,
     "ground_contact_penalty": 100.0,
-    "hold_bonus_weight": 1.0,
+    "hold_bonus_weight": 0.0,
     "success_bonus": 100.0
   },
   "render": {

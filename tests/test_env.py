@@ -33,6 +33,7 @@ def make_static_env(*, success_hold_steps: int = 3, success_tolerance: float = 1
         ),
         reward=RewardConfig(
             progress_weight=env.config.reward.progress_weight,
+            distance_weight=env.config.reward.distance_weight,
             torque_weight=env.config.reward.torque_weight,
             motion_weight=env.config.reward.motion_weight,
             smoothness_weight=env.config.reward.smoothness_weight,
@@ -61,7 +62,7 @@ def test_reset_samples_target_above_ground():
 
     ys = [float(env.reset(seed=seed)["target_pos"][1]) for seed in range(20)]
 
-    assert all(0.8 <= y <= 2.0 for y in ys)
+    assert all(0.8 <= y <= 1.4 for y in ys)
 
 
 def test_reset_rejects_target_on_or_below_ground():
@@ -154,6 +155,7 @@ def test_reward_breakdown_uses_motion_and_hold_not_power():
 
     reward_terms = result.info["reward_terms"]
     assert "progress_reward" in reward_terms
+    assert "distance_penalty" in reward_terms
     assert "motion_penalty" in reward_terms
     assert "hold_bonus" in reward_terms
     assert "power_penalty" not in reward_terms
@@ -170,15 +172,17 @@ def test_progress_reward_is_positive_when_distance_decreases():
         hold_progress=0.0,
         success=False,
         progress_weight=5.0,
-        torque_weight=0.01,
-        motion_weight=0.001,
-        smoothness_weight=0.01,
+        distance_weight=0.5,
+        torque_weight=0.0,
+        motion_weight=0.0,
+        smoothness_weight=0.002,
         ground_contact_penalty=100.0,
-        hold_bonus_weight=1.0,
+        hold_bonus_weight=0.0,
         success_bonus=100.0,
     )
 
     assert breakdown.progress_reward == 2.5
+    assert breakdown.distance_penalty == -0.75
 
 
 def test_ground_contact_rejects_invalid_step_and_zeros_motion():

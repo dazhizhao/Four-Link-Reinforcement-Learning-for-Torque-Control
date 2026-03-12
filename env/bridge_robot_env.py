@@ -54,6 +54,7 @@ class TaskConfig:
 @dataclass(frozen=True)
 class RewardConfig:
     progress_weight: float
+    distance_weight: float
     torque_weight: float
     motion_weight: float
     smoothness_weight: float
@@ -282,6 +283,7 @@ class BridgeRobotEnv:
             hold_progress=hold_progress if success_ready else 0.0,
             success=success,
             progress_weight=self.config.reward.progress_weight,
+            distance_weight=self.config.reward.distance_weight,
             torque_weight=self.config.reward.torque_weight,
             motion_weight=self.config.reward.motion_weight,
             smoothness_weight=self.config.reward.smoothness_weight,

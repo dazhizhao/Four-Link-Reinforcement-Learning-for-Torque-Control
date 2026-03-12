@@ -24,7 +24,7 @@
 默认配置在 [`configs/default.yaml`](/d:/0311_demo/Project_jiaogai/configs/default.yaml)：
 
 - `success_tolerance = 0.08`
-- `success_hold_steps = 10`
+- `success_hold_steps = 5`
 
 单步进入容差球不会立即成功。只有末端连续 `10` 个仿真步都满足 `distance_to_target <= success_tolerance`，回合才会以成功终止。中途一旦离开容差球，连续保持计数会清零。
 
@@ -33,12 +33,15 @@
 当前 reward 由以下部分组成：
 
 - `progress_reward = progress_weight * (previous_distance_to_target - current_distance_to_target)`
+- `distance_penalty = -distance_weight * current_distance_to_target`
 - `torque_penalty = -torque_weight * sum((applied_torque / torque_limits)^2)`
 - `motion_penalty = -motion_weight * sum(qd^2)`
 - `smoothness_penalty = -smoothness_weight * sum((action_norm - prev_action_norm)^2)`
 - `ground_contact_penalty`：撞地时一次性失败惩罚
 - `hold_bonus = hold_bonus_weight * hold_progress`
 - `success_bonus`
+
+当前默认配置会把目标采样先限制在更容易的上半平面子区域 `x ∈ [2.0, 3.0], y ∈ [0.8, 1.4]`，相当于一个轻量 curriculum，用来先学会“接近并停住”，再考虑放宽采样范围。
 
 `joint_power` 仍然会在状态、历史和可视化中保留，但不再作为优化目标进入 reward。
 
