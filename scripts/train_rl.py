@@ -300,6 +300,10 @@ def main() -> None:
     progress_callback = build_progress_callback(BaseCallback, total_timesteps=total_timesteps)
     model.learn(total_timesteps=total_timesteps, progress_bar=False, callback=progress_callback)
 
+    train_env.close()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+
     model_path = run_dir / "model_final.zip"
     model.save(str(model_path))
     training_curves_path = save_training_curves(
@@ -343,7 +347,6 @@ def main() -> None:
     }
     ensure_json(run_dir / "summary.json", summary_payload)
 
-    train_env.close()
     eval_env.close()
 
     print(f"saved model to {model_path}")
