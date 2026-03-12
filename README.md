@@ -20,6 +20,36 @@ That motivation led to a simple pipeline:
 
 The simulator models a four-link manipulator with explicit kinematics and dynamics. The RL task uses a 4D normalized torque action, and training is performed with SAC using `MlpPolicy`. A rollout is counted as successful only when the end effector reaches the tolerance region and stays there for several consecutive steps.
 
+### Reward Design
+
+The reward policy is an important part of the task design. At each step, the total reward is
+
+$$
+r_t =
+w_p (d_{t-1} - d_t)
+- w_d d_t
++ w_b \max(r_p - d_t, 0)
+- w_{\tau} \lVert a_t \rVert_2^2
+- w_v \lVert \dot{q}_t \rVert_2^2
+- w_s \lVert a_t - a_{t-1} \rVert_2^2
+- \mathbf{1}_{\text{ground}} p_g
++ w_h h_t
++ \mathbf{1}_{\text{success}} b_s
+$$
+
+where $d_t$ is the distance to the target, $a_t$ is the normalized torque action, $\dot{q}_t$ is the joint-velocity vector, and $h_t$ is the hold-progress term used by the success criterion.
+
+In the current default configuration, the main active terms are:
+
+- progress reward: $w_p = 5.0$
+- distance penalty: $w_d = 0.5$
+- proximity bonus inside $r_p = 0.5$: $w_b = 10.0$
+- smoothness penalty: $w_s = 0.002$
+- ground-contact penalty: $p_g = 100.0$
+- success bonus: $b_s = 100.0$
+
+The torque penalty, motion penalty, and hold bonus are currently set to zero. In practice, this reward design first pushes the policy to reach the target region, and later encourages smoother and faster behavior.
+
 ## Environment and Learning Setup
 
 The main task uses the following settings.
