@@ -26,7 +26,7 @@
 - `success_tolerance = 0.08`
 - `success_hold_steps = 5`
 
-单步进入容差球不会立即成功。只有末端连续 `10` 个仿真步都满足 `distance_to_target <= success_tolerance`，回合才会以成功终止。中途一旦离开容差球，连续保持计数会清零。
+单步进入容差球不会立即成功。只有末端连续 `5` 个仿真步都满足 `distance_to_target <= success_tolerance`，回合才会以成功终止。中途一旦离开容差球，连续保持计数会清零。
 
 ### 奖励设计
 
@@ -34,6 +34,7 @@
 
 - `progress_reward = progress_weight * (previous_distance_to_target - current_distance_to_target)`
 - `distance_penalty = -distance_weight * current_distance_to_target`
+- `proximity_bonus = proximity_bonus_weight * max(proximity_radius - current_distance_to_target, 0.0)`
 - `torque_penalty = -torque_weight * sum((applied_torque / torque_limits)^2)`
 - `motion_penalty = -motion_weight * sum(qd^2)`
 - `smoothness_penalty = -smoothness_weight * sum((action_norm - prev_action_norm)^2)`
@@ -78,6 +79,7 @@ python scripts/train_rl.py \
 
 至少包含：
 
+- `best_model.zip`
 - `model_final.zip`
 - `progress.csv`
 - `summary.json`
@@ -99,7 +101,7 @@ python scripts/train_rl.py \
 - `mean_motion_penalty`
 - `mean_smoothness_penalty`
 
-最佳回合优先从成功回合中选择；若评估时没有成功回合，则退化为总回报最高回合。其余可视化和回放文件统一放在 `artifacts/` 子目录，避免根目录堆太多文件。
+训练期间会按固定 `eval_freq` 做 deterministic evaluation，并按 `success_rate -> mean_final_distance -> mean_reward` 的顺序保存 `best_model.zip`。最佳回合优先从成功回合中选择；若评估时没有成功回合，则退化为总回报最高回合。其余可视化和回放文件统一放在 `artifacts/` 子目录，避免根目录堆太多文件。
 
 训练期间控制台输出已精简为少量开始/结束信息。更完整的训练过程曲线会保存到 `artifacts/training_curves.png`，其中会尽量展示 episode reward、episode length 以及 SB3 记录到 `progress.csv` 中的 actor/critic loss 等常见 RL 指标。
 训练结束时也会明确打印 torque rollout 视频路径；同一路径也会写入 `summary.json -> evaluation -> artifact_paths -> rollout_video`。

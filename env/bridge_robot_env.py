@@ -55,6 +55,8 @@ class TaskConfig:
 class RewardConfig:
     progress_weight: float
     distance_weight: float
+    proximity_radius: float
+    proximity_bonus_weight: float
     torque_weight: float
     motion_weight: float
     smoothness_weight: float
@@ -284,6 +286,8 @@ class BridgeRobotEnv:
             success=success,
             progress_weight=self.config.reward.progress_weight,
             distance_weight=self.config.reward.distance_weight,
+            proximity_radius=self.config.reward.proximity_radius,
+            proximity_bonus_weight=self.config.reward.proximity_bonus_weight,
             torque_weight=self.config.reward.torque_weight,
             motion_weight=self.config.reward.motion_weight,
             smoothness_weight=self.config.reward.smoothness_weight,

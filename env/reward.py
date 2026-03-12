@@ -10,6 +10,7 @@ import numpy as np
 class RewardBreakdown:
     progress_reward: float
     distance_penalty: float
+    proximity_bonus: float
     torque_penalty: float
     motion_penalty: float
     smoothness_penalty: float
@@ -22,6 +23,7 @@ class RewardBreakdown:
         return (
             self.progress_reward
             + self.distance_penalty
+            + self.proximity_bonus
             + self.torque_penalty
             + self.motion_penalty
             + self.smoothness_penalty
@@ -47,6 +49,8 @@ def compute_reward(
     success: bool,
     progress_weight: float,
     distance_weight: float,
+    proximity_radius: float,
+    proximity_bonus_weight: float,
     torque_weight: float,
     motion_weight: float,
     smoothness_weight: float,
@@ -58,10 +62,12 @@ def compute_reward(
     joint_velocity = np.asarray(joint_velocities, dtype=float)
     prev_action = np.asarray(previous_action, dtype=float)
     progress = float(previous_distance) - float(current_distance)
+    proximity_bonus = max(float(proximity_radius) - float(current_distance), 0.0)
 
     return RewardBreakdown(
         progress_reward=progress_weight * progress,
         distance_penalty=-distance_weight * float(current_distance),
+        proximity_bonus=proximity_bonus_weight * proximity_bonus,
         torque_penalty=-torque_weight * float(np.sum(action**2)),
         motion_penalty=-motion_weight * float(np.sum(joint_velocity**2)),
         smoothness_penalty=-smoothness_weight * float(np.sum((action - prev_action) ** 2)),

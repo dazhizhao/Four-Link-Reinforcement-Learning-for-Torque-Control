@@ -29,6 +29,8 @@ def make_env() -> TorqueControlEnv:
         reward=RewardConfig(
             progress_weight=base_env.config.reward.progress_weight,
             distance_weight=base_env.config.reward.distance_weight,
+            proximity_radius=base_env.config.reward.proximity_radius,
+            proximity_bonus_weight=base_env.config.reward.proximity_bonus_weight,
             torque_weight=base_env.config.reward.torque_weight,
             motion_weight=base_env.config.reward.motion_weight,
             smoothness_weight=base_env.config.reward.smoothness_weight,

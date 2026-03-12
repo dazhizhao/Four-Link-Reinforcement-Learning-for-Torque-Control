@@ -34,6 +34,8 @@ def make_static_env(*, success_hold_steps: int = 3, success_tolerance: float = 1
         reward=RewardConfig(
             progress_weight=env.config.reward.progress_weight,
             distance_weight=env.config.reward.distance_weight,
+            proximity_radius=env.config.reward.proximity_radius,
+            proximity_bonus_weight=env.config.reward.proximity_bonus_weight,
             torque_weight=env.config.reward.torque_weight,
             motion_weight=env.config.reward.motion_weight,
             smoothness_weight=env.config.reward.smoothness_weight,
@@ -156,6 +158,7 @@ def test_reward_breakdown_uses_motion_and_hold_not_power():
     reward_terms = result.info["reward_terms"]
     assert "progress_reward" in reward_terms
     assert "distance_penalty" in reward_terms
+    assert "proximity_bonus" in reward_terms
     assert "motion_penalty" in reward_terms
     assert "hold_bonus" in reward_terms
     assert "power_penalty" not in reward_terms
@@ -173,6 +176,8 @@ def test_progress_reward_is_positive_when_distance_decreases():
         success=False,
         progress_weight=5.0,
         distance_weight=0.5,
+        proximity_radius=0.5,
+        proximity_bonus_weight=10.0,
         torque_weight=0.0,
         motion_weight=0.0,
         smoothness_weight=0.002,
@@ -183,6 +188,32 @@ def test_progress_reward_is_positive_when_distance_decreases():
 
     assert breakdown.progress_reward == 2.5
     assert breakdown.distance_penalty == -0.75
+    assert breakdown.proximity_bonus == 0.0
+
+
+def test_proximity_bonus_activates_inside_half_meter():
+    breakdown = compute_reward(
+        previous_distance=0.45,
+        current_distance=0.2,
+        action_normalized=np.zeros(4, dtype=float),
+        joint_velocities=np.zeros(4, dtype=float),
+        previous_action=np.zeros(4, dtype=float),
+        ground_contact=False,
+        hold_progress=0.0,
+        success=False,
+        progress_weight=5.0,
+        distance_weight=0.5,
+        proximity_radius=0.5,
+        proximity_bonus_weight=10.0,
+        torque_weight=0.0,
+        motion_weight=0.0,
+        smoothness_weight=0.002,
+        ground_contact_penalty=100.0,
+        hold_bonus_weight=0.0,
+        success_bonus=100.0,
+    )
+
+    assert breakdown.proximity_bonus == 3.0
 
 
 def test_ground_contact_rejects_invalid_step_and_zeros_motion():

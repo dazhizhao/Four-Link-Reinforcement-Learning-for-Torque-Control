@@ -46,6 +46,7 @@ class TrainConfig:
     gamma: float
     tau: float
     eval_episodes: int
+    eval_freq: int
     run_name: str
     output_dir: str
 
@@ -94,11 +95,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def load_sac():
     from stable_baselines3 import SAC
-    from stable_baselines3.common.callbacks import BaseCallback
+    from stable_baselines3.common.callbacks import BaseCallback, CallbackList
     from stable_baselines3.common.logger import configure
     from stable_baselines3.common.monitor import Monitor
 
-    return SAC, Monitor, configure, BaseCallback
+    return SAC, Monitor, configure, BaseCallback, CallbackList
 
 
 def build_progress_callback(base_callback_cls, total_timesteps: int):
@@ -150,6 +151,58 @@ def clone_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
             snapshot[key] = value.copy() if isinstance(value, np.ndarray) else value
         cloned.append(snapshot)
     return cloned
+
+
+def is_better_evaluation(candidate: dict[str, Any], incumbent: dict[str, Any] | None) -> bool:
+    if incumbent is None:
+        return True
+
+    candidate_key = (
+        float(candidate["success_rate"]),
+        -float(candidate["mean_final_distance"]),
+        float(candidate["mean_reward"]),
+    )
+    incumbent_key = (
+        float(incumbent["success_rate"]),
+        -float(incumbent["mean_final_distance"]),
+        float(incumbent["mean_reward"]),
+    )
+    return candidate_key > incumbent_key
+
+
+def build_periodic_eval_callback(
+    base_callback_cls,
+    *,
+    eval_env: TorqueControlEnv,
+    eval_episodes: int,
+    base_seed: int,
+    eval_freq: int,
+    best_model_path: Path,
+):
+    class PeriodicEvalCallback(base_callback_cls):
+        def __init__(self) -> None:
+            super().__init__()
+            self.best_evaluation: dict[str, Any] | None = None
+            self._last_eval_timestep = 0
+
+        def _run_evaluation(self) -> None:
+            evaluation = evaluate_policy(
+                self.model,
+                eval_env,
+                eval_episodes=eval_episodes,
+                base_seed=base_seed,
+            )
+            if is_better_evaluation(evaluation, self.best_evaluation):
+                self.best_evaluation = copy.deepcopy(evaluation)
+                self.model.save(str(best_model_path))
+
+        def _on_step(self) -> bool:
+            if eval_freq > 0 and (self.num_timesteps - self._last_eval_timestep) >= eval_freq:
+                self._run_evaluation()
+                self._last_eval_timestep = int(self.num_timesteps)
+            return True
+
+    return PeriodicEvalCallback()
 
 
 def run_deterministic_episode(model, env: TorqueControlEnv, seed: int) -> EpisodeSummary:
@@ -277,7 +330,7 @@ def main() -> None:
     run_dir, resolved_run_name = build_run_dir(output_root, "rl_torque_control", run_name)
     artifacts_dir = ensure_artifacts_dir(run_dir)
 
-    SAC, Monitor, configure, BaseCallback = load_sac()
+    SAC, Monitor, configure, BaseCallback, CallbackList = load_sac()
 
     train_env = Monitor(TorqueControlEnv(config=env_config), filename=str(run_dir / "monitor.csv"))
     eval_env = TorqueControlEnv(config=env_config)
@@ -300,7 +353,20 @@ def main() -> None:
     model.set_logger(configure(str(run_dir), ["csv"]))
     print(f"training torque control: run={resolved_run_name} timesteps={total_timesteps} seed={seed}")
     progress_callback = build_progress_callback(BaseCallback, total_timesteps=total_timesteps)
-    model.learn(total_timesteps=total_timesteps, progress_bar=False, callback=progress_callback)
+    best_model_path = run_dir / "best_model.zip"
+    eval_callback = build_periodic_eval_callback(
+        BaseCallback,
+        eval_env=eval_env,
+        eval_episodes=eval_episodes,
+        base_seed=seed + 1000,
+        eval_freq=train_config.eval_freq,
+        best_model_path=best_model_path,
+    )
+    model.learn(
+        total_timesteps=total_timesteps,
+        progress_bar=False,
+        callback=CallbackList([progress_callback, eval_callback]),
+    )
 
     train_env.close()
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -314,13 +380,24 @@ def main() -> None:
         progress_csv_path=run_dir / "progress.csv",
     )
 
-    evaluation = evaluate_policy(model, eval_env, eval_episodes=eval_episodes, base_seed=seed + 1000)
+    final_evaluation = evaluate_policy(model, eval_env, eval_episodes=eval_episodes, base_seed=seed + 1000)
+    if is_better_evaluation(final_evaluation, eval_callback.best_evaluation):
+        evaluation = final_evaluation
+        model.save(str(best_model_path))
+    else:
+        evaluation = copy.deepcopy(eval_callback.best_evaluation)
+        if evaluation is None:
+            evaluation = final_evaluation
+            model.save(str(best_model_path))
+
     artifact_paths = export_best_episode(
         artifacts_dir=artifacts_dir,
         env_config=env_config,
         best_episode=evaluation["best_episode"],
     )
     artifact_paths["training_curves"] = str(training_curves_path)
+    artifact_paths["best_model"] = str(best_model_path)
+    artifact_paths["final_model"] = str(model_path)
     summary_payload = {
         "env_config": asdict(env_config),
         "train_config": asdict(train_config),
@@ -344,6 +421,7 @@ def main() -> None:
             "best_episode_seed": evaluation["best_episode"].seed,
             "best_episode_reward": evaluation["best_episode"].reward,
             "best_episode_success": evaluation["best_episode"].success,
+            "selection_policy": "success_rate_then_distance_then_reward",
             "artifact_paths": artifact_paths,
         },
     }
@@ -352,6 +430,7 @@ def main() -> None:
     eval_env.close()
 
     print(f"saved model to {model_path}")
+    print(f"saved best model to {best_model_path}")
     print(f"saved summary to {run_dir / 'summary.json'}")
     print(f"saved artifacts to {artifacts_dir}")
     print(f"saved rollout video to {artifact_paths['rollout_video']}")

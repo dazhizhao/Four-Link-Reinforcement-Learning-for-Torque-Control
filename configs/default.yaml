@@ -32,6 +32,8 @@
   "reward": {
     "progress_weight": 5.0,
     "distance_weight": 0.5,
+    "proximity_radius": 0.5,
+    "proximity_bonus_weight": 10.0,
     "torque_weight": 0.0,
     "motion_weight": 0.0,
     "smoothness_weight": 0.002,

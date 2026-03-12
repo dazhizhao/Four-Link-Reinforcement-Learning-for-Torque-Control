@@ -34,6 +34,7 @@ def test_train_rl_smoke_creates_expected_outputs(tmp_path: Path):
     artifacts_dir = run_dir / "artifacts"
 
     assert (run_dir / "model_final.zip").exists()
+    assert (run_dir / "best_model.zip").exists()
     assert (run_dir / "progress.csv").exists()
     assert (run_dir / "summary.json").exists()
     assert (artifacts_dir / "best_rollout.npz").exists()
@@ -56,6 +57,7 @@ def test_train_rl_smoke_creates_expected_outputs(tmp_path: Path):
     }
     assert "rollout_video" in evaluation["artifact_paths"]
     assert evaluation["artifact_paths"]["rollout_video"].endswith("best_rollout.mp4")
+    assert evaluation["artifact_paths"]["best_model"].endswith("best_model.zip")
 
     samples = np.load(artifacts_dir / "best_rollout.npz")
     assert set(samples.files) >= {"step", "reward", "distance_to_target", "applied_action"}
