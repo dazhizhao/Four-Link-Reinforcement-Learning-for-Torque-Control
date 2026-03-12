@@ -6,11 +6,13 @@ This repository studies torque control for a four-link manipulator with reinforc
 
 ## Project Motivation
 
-The project follows a simple three-stage workflow.
+This project started from a personal interest in reinforcement learning after watching DeepMind's *The Thinking Game*. I wanted to try the RL workflow myself, especially the idea of training directly through interaction with an environment instead of relying on an offline dataset.
 
-1. A physical model is established from theoretical mechanics, including kinematics, dynamics, damping, gravity, and joint torque limits.
-2. The simulator is wrapped as a reinforcement learning environment.
-3. A policy is trained and evaluated through rollout videos across different optimization stages.
+That motivation led to a simple pipeline:
+
+1. Build a physical model from theoretical mechanics.
+2. Use that model as the reinforcement learning environment.
+3. Train a policy and compare rollout videos across optimization stages.
 
 ## Method
 
@@ -56,13 +58,6 @@ Video: [stage-100k.mp4](docs/media/stage-100k.mp4)
 At 200k steps, the behavior is close to the success threshold, showing strong improvement in target-reaching quality.  
 Video: [stage-200k.mp4](docs/media/stage-200k.mp4)
 
-### Stage 500k
-
-![Stage 500k rollout](docs/media/stage-500k.gif)
-
-At 500k steps, the policy begins to satisfy the success condition and reaches the target faster.  
-Video: [stage-500k.mp4](docs/media/stage-500k.mp4)
-
 ### Best Policy
 
 ![Best policy rollout](docs/media/best-policy.gif)
@@ -96,28 +91,6 @@ python -m pytest tests
 ```
 
 The original workflow used local development and cloud-based training.
-
-## Repository Layout
-
-```text
-.
-|-- configs/
-|-- docs/
-|   `-- media/
-|-- env/
-|-- scripts/
-|-- tests/
-|-- visualization/
-|-- requirements.yaml
-`-- README.md
-```
-
-Key files:
-
-- [`env/bridge_robot_env.py`](env/bridge_robot_env.py): mechanics-based simulator
-- [`env/torque_control_env.py`](env/torque_control_env.py): RL wrapper for continuous torque control
-- [`scripts/train_rl.py`](scripts/train_rl.py): SAC training entry point
-- [`visualization/`](visualization): plotting, rendering, and rollout export utilities
 
 ## Conclusion
 
