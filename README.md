@@ -22,33 +22,9 @@ The simulator models a four-link manipulator with explicit kinematics and dynami
 
 ### Reward Design
 
-The reward policy is an important part of the task design. At each step, the total reward is
+The reward policy is designed to make the agent approach the target, stay close to it, and finally satisfy the success condition. In the current setting, the main terms reward progress, penalize remaining distance, add a bonus near the target, discourage abrupt torque changes, heavily penalize ground contact, and give a clear success bonus.
 
-$$
-r_t =
-w_p (d_{t-1} - d_t)
-- w_d d_t
-+ w_b \max(r_p - d_t, 0)
-- w_{\tau} \lVert a_t \rVert_2^2
-- w_v \lVert \dot{q}_t \rVert_2^2
-- w_s \lVert a_t - a_{t-1} \rVert_2^2
-- \mathbf{1}_{\text{ground}} p_g
-+ w_h h_t
-+ \mathbf{1}_{\text{success}} b_s
-$$
-
-where $d_t$ is the distance to the target, $a_t$ is the normalized torque action, $\dot{q}_t$ is the joint-velocity vector, and $h_t$ is the hold-progress term used by the success criterion.
-
-In the current default configuration, the main active terms are:
-
-- progress reward: $w_p = 5.0$
-- distance penalty: $w_d = 0.5$
-- proximity bonus inside $r_p = 0.5$: $w_b = 10.0$
-- smoothness penalty: $w_s = 0.002$
-- ground-contact penalty: $p_g = 100.0$
-- success bonus: $b_s = 100.0$
-
-The torque penalty, motion penalty, and hold bonus are currently set to zero. In practice, this reward design first pushes the policy to reach the target region, and later encourages smoother and faster behavior.
+This design is important because it matches the behavior seen in training: the policy first learns to reach the target region, and later improves stability and speed.
 
 ## Environment and Learning Setup
 
