@@ -33,7 +33,7 @@ The training entry point is [`scripts/train_rl.py`](scripts/train_rl.py), and th
 
 ## Training Progress and Results
 
-The results below come from the SAC run `sac_torque_control_20260312-124907_f23d` on March 12, 2026. The overall trend is clear: early training mainly improves whether the manipulator can reach the target region, while later training improves how quickly it can do so.
+The overall trend is clear: early training mainly improves whether the manipulator can reach the target region, while later training improves how quickly it can do so.
 
 ### Stage 50k
 
