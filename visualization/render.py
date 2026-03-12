@@ -72,6 +72,7 @@ def render_environment_state(
         [
             f"step: {state.step_count}",
             f"distance: {state.distance_to_target:.3f} m",
+            f"hold progress: {float(state.hold_progress):.2f}",
             torque_text,
             power_text,
         ]

@@ -91,6 +91,7 @@ def export_rollout_video(
                 [
                     f"step: {frame['step']}",
                     f"distance: {float(frame['distance_to_target']):.3f} m",
+                    f"hold progress: {float(frame.get('hold_progress', 0.0)):.2f}",
                     torque_text,
                 ]
             )

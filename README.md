@@ -1,50 +1,152 @@
 # 桥梁检测机器人控制优化
 
-项目当前包含两条能力线：
+当前仓库的默认强化学习主线已经切换为四关节连续力矩控制。目标是在机构参数、负载参数和关节力矩上限固定的前提下，学习一个 torque policy，让机械臂末端能够稳定进入目标容差球，并在满足到达要求的同时尽量减少力矩使用、抑制大动作和突变。
 
-- Phase 1：已经完成的 `torque-based physics environment`，用于四自由度平面机械臂的最小物理闭环。
-- 当前主线：`link allocation RL environment`，在总杆长固定的约束下优化四连杆长度分配，使末端工作空间尽可能大。
+旧的杆长分配任务仍然保留，但已经降级为次线能力，不再是默认训练入口。
 
-## 当前 RL 主线
+## 当前主线：Torque Control RL
 
-当前强化学习任务不是直接学习关节力矩，而是优化四根杆的长度分配。
+主训练环境是 `BridgeRobotEnv` 的 RL 包装层 `TorqueControlEnv`：
 
-目标表述为：
+- 动作：4 维连续归一化力矩 `Box(-1, 1, shape=(4,))`
+- 内部执行：按各关节 `torque_limits` 缩放为物理力矩后进入 `BridgeRobotEnv.step(...)`
+- 观测：18 维扁平连续向量，包含
+  - 归一化关节角 `q`
+  - 归一化关节角速度 `qd`
+  - 归一化末端位置
+  - 归一化目标相对位移
+  - 归一化距离
+  - 上一步归一化动作
+  - `hold_progress`
 
-> 在保持四根杆总长不变的前提下，分配各杆长度，使末端在受限关节角域内形成尽可能大的可达工作空间。
+### 稳定成功判据
 
-## 为什么旧奖励会退化
+默认配置在 [`configs/default.yaml`](/d:/0311_demo/Project_jiaogai/configs/default.yaml)：
 
-旧版本奖励采用解析环域面积：
+- `success_tolerance = 0.08`
+- `success_hold_steps = 10`
 
-- `outer_radius = sum(lengths) = total_length`
-- `inner_radius = max(0, 2 * max(lengths) - total_length)`
+单步进入容差球不会立即成功。只有末端连续 `10` 个仿真步都满足 `distance_to_target <= success_tolerance`，回合才会以成功终止。中途一旦离开容差球，连续保持计数会清零。
 
-在当前默认约束下：
+### 奖励设计
 
-- `total_length = 3.6`
-- `max_link_lengths = [1.4, 1.4, 1.4, 1.4]`
+当前 reward 由以下部分组成：
 
-因为任意单杆都小于 `total_length / 2 = 1.8`，所有可行解都会得到 `inner_radius = 0`，于是奖励恒定，RL 无法学到有区分度的策略。
+- `distance_reward = -distance_weight * distance_to_target`
+- `torque_penalty = -torque_weight * sum((applied_torque / torque_limits)^2)`
+- `motion_penalty = -motion_weight * sum(qd^2)`
+- `smoothness_penalty = -smoothness_weight * sum((action_norm - prev_action_norm)^2)`
+- `hold_bonus = hold_bonus_weight * hold_progress`
+- `success_bonus`
 
-## 新奖励定义
+`joint_power` 仍然会在状态、历史和可视化中保留，但不再作为优化目标进入 reward。
 
-当前奖励已经改为“有限关节角域下的采样工作空间覆盖率”：
+### 训练入口
 
-1. 在显式关节角限制内采样一批姿态 `q`
-2. 用正运动学得到末端点云
-3. 将点云映射到 2D occupancy grid
-4. 以 `occupied_cells / total_cells` 作为 reward
+默认训练脚本是 [`scripts/train_rl.py`](/d:/0311_demo/Project_jiaogai/scripts/train_rl.py)，算法默认仍为 SAC。
 
-同时输出：
+默认训练配置位于 [`configs/train_rl.yaml`](/d:/0311_demo/Project_jiaogai/configs/train_rl.yaml)。
 
-- `workspace_points`
-- `occupied_ratio`
-- `workspace_area_estimate`
-- `grid_shape`
-- `xy_bounds`
+训练命令：
 
-这种定义保留了孔洞、非凸边界和角域限制带来的真实差异，不再依赖解析环域公式。
+```bash
+python scripts/train_rl.py
+```
+
+覆盖参数示例：
+
+```bash
+python scripts/train_rl.py \
+  --total-timesteps 5000 \
+  --run-name exp001 \
+  --output-dir /openbayes/home/results
+```
+
+### 训练输出
+
+训练结果写入：
+
+```text
+<output_dir>/rl_torque_control/<run_name>_<timestamp>_<suffix>/
+```
+
+至少包含：
+
+- `model_final.zip`
+- `progress.csv`
+- `summary.json`
+- `monitor.csv`
+- `artifacts/training_curves.png`
+- `artifacts/best_rollout.npz`
+- `artifacts/best_pose.png`
+- `artifacts/best_rollout.mp4`
+
+每次 run 会自动附加时间戳和短随机后缀，避免同名实验互相覆盖。
+
+`summary.json` 会集中保存训练配置、解析后的实际输出目录和评估结果，其中评估部分会输出：
+
+- `success_rate`
+- `mean_reward`
+- `mean_final_distance`
+- `mean_episode_length`
+- `mean_torque_norm`
+- `mean_motion_penalty`
+- `mean_smoothness_penalty`
+
+最佳回合优先从成功回合中选择；若评估时没有成功回合，则退化为总回报最高回合。其余可视化和回放文件统一放在 `artifacts/` 子目录，避免根目录堆太多文件。
+
+训练期间控制台输出已精简为少量开始/结束信息。更完整的训练过程曲线会保存到 `artifacts/training_curves.png`，其中会尽量展示 episode reward、episode length 以及 SB3 记录到 `progress.csv` 中的 actor/critic loss 等常见 RL 指标。
+
+## 物理环境与可视化
+
+主任务底层物理核心仍是 `BridgeRobotEnv`，相关模块包括：
+
+- [`env/bridge_robot_env.py`](/d:/0311_demo/Project_jiaogai/env/bridge_robot_env.py)
+- [`env/dynamics.py`](/d:/0311_demo/Project_jiaogai/env/dynamics.py)
+- [`env/kinematics.py`](/d:/0311_demo/Project_jiaogai/env/kinematics.py)
+- [`env/reward.py`](/d:/0311_demo/Project_jiaogai/env/reward.py)
+- [`visualization/render.py`](/d:/0311_demo/Project_jiaogai/visualization/render.py)
+- [`visualization/plots.py`](/d:/0311_demo/Project_jiaogai/visualization/plots.py)
+- [`visualization/video.py`](/d:/0311_demo/Project_jiaogai/visualization/video.py)
+
+常用命令：
+
+```bash
+python scripts/run_env.py --policy zero --seed 7 --output-dir /openbayes/home/results
+python scripts/run_env.py --policy random --seed 7 --output-dir /openbayes/home/results
+python scripts/visualize_env.py
+```
+
+## 次线任务：Link Allocation RL
+
+旧的杆长分配任务仍然可用，但不再是默认主线。
+
+- 环境：[`env/link_allocation_env.py`](/d:/0311_demo/Project_jiaogai/env/link_allocation_env.py)
+- 训练脚本：[`scripts/train_link_allocation.py`](/d:/0311_demo/Project_jiaogai/scripts/train_link_allocation.py)
+- 配置：[`configs/train_link_allocation.yaml`](/d:/0311_demo/Project_jiaogai/configs/train_link_allocation.yaml)
+
+训练命令：
+
+```bash
+python scripts/train_link_allocation.py
+```
+
+输出目录仍为：
+
+```text
+<output_dir>/rl_link_alloc/<run_name>_<timestamp>_<suffix>/
+```
+
+输出也统一整理为：
+
+- `model_final.zip`
+- `progress.csv`
+- `summary.json`
+- `monitor.csv`
+- `artifacts/training_curves.png`
+- `artifacts/best_workspace_samples.npz`
+- `artifacts/best_workspace.png`
+- `artifacts/best_workspace.mp4`
 
 ## 仓库结构
 
@@ -55,6 +157,7 @@ project/
 ├── configs/
 │   ├── default.yaml
 │   ├── link_allocation_env.yaml
+│   ├── train_link_allocation.yaml
 │   └── train_rl.yaml
 ├── env/
 │   ├── __init__.py
@@ -62,159 +165,16 @@ project/
 │   ├── dynamics.py
 │   ├── kinematics.py
 │   ├── link_allocation_env.py
-│   └── reward.py
+│   ├── reward.py
+│   └── torque_control_env.py
 ├── scripts/
 │   ├── run_env.py
+│   ├── train_link_allocation.py
 │   ├── train_rl.py
 │   └── visualize_env.py
 ├── tests/
-│   ├── test_dynamics.py
-│   ├── test_env.py
-│   ├── test_kinematics.py
-│   ├── test_link_allocation_env.py
-│   ├── test_run_env.py
-│   ├── test_train_rl.py
-│   └── test_visualization.py
 └── visualization/
-    ├── __init__.py
-    ├── link_allocation.py
-    ├── plots.py
-    ├── render.py
-    └── video.py
 ```
-
-## Phase 1：已完成的 torque-based 环境
-
-这部分已经完成并稳定，可继续作为物理基线使用：
-
-- `BridgeRobotEnv`
-- `env/kinematics.py`
-- `env/dynamics.py`
-- `env/reward.py`
-- `scripts/run_env.py`
-- `scripts/visualize_env.py`
-- `visualization/`
-
-常用命令：
-
-```bash
-python scripts/run_env.py --policy zero --seed 7 --output-dir /openbayes/home/results
-python scripts/run_env.py --policy random --seed 7 --output-dir /openbayes/home/results
-python scripts/visualize_env.py
-python -m pytest tests
-```
-
-## Phase 2：杆长分配 RL 环境
-
-当前 RL 环境为 `LinkAllocationEnv`，保持单步、bandit-like 形式：
-
-- 观测：固定 13 维，包含默认杆长、上下界和总长
-- 动作：4 维候选杆长
-- 约束：动作会被投影到“逐杆上下界 + 总长固定”的 bounded simplex
-- 奖励：受限角域下的工作空间 occupancy coverage
-- 回合：`step()` 后立即结束
-
-### 默认环境配置
-
-`configs/link_allocation_env.yaml` 当前包含：
-
-- `total_length = 3.6`
-- `default_link_lengths = [1.2, 1.0, 0.8, 0.6]`
-- `min_link_lengths = [0.4, 0.4, 0.4, 0.4]`
-- `max_link_lengths = [1.4, 1.4, 1.4, 1.4]`
-- `joint_angle_limits`
-- `workspace_sampling`
-- `video`
-
-其中：
-
-- `joint_angle_limits` 控制工作空间评估时允许采样的关节角范围
-- `workspace_sampling` 控制采样数量、seed、occupancy grid 大小和显示边界
-- `video` 控制训练后自动导出的 MP4 参数
-
-### 环境接口
-
-```python
-from env.link_allocation_env import LinkAllocationEnv
-
-env = LinkAllocationEnv()
-obs, info = env.reset(seed=7)
-obs, reward, terminated, truncated, info = env.step([0.9, 0.9, 0.9, 0.9])
-```
-
-`step(...).info` 至少包含：
-
-- `allocated_lengths`
-- `raw_action`
-- `projection_applied`
-- `workspace_points`
-- `occupied_ratio`
-- `workspace_area_estimate`
-- `grid_shape`
-- `xy_bounds`
-
-## SAC 训练入口
-
-`scripts/train_rl.py` 使用 SAC 训练杆长分配策略。
-
-默认训练配置在 `configs/train_rl.yaml`：
-
-- `algo = sac`
-- `policy = MlpPolicy`
-- `total_timesteps = 2000`
-- `seed = 7`
-- `device = auto`
-- `learning_starts = 32`
-- `buffer_size = 4096`
-- `batch_size = 64`
-- `train_freq = 1`
-- `gradient_steps = 1`
-- `learning_rate = 3e-4`
-- `gamma = 0.99`
-- `tau = 0.005`
-- `eval_episodes = 5`
-- `run_name = sac_link_alloc`
-- `output_dir = /openbayes/home/results`
-
-训练命令：
-
-```bash
-python scripts/train_rl.py
-```
-
-覆盖参数：
-
-```bash
-python scripts/train_rl.py \
-  --total-timesteps 5000 \
-  --run-name exp001 \
-  --output-dir /openbayes/home/results
-```
-
-## 训练输出
-
-训练结果写入：
-
-```text
-<output_dir>/rl_link_alloc/<run_name>/
-```
-
-至少包含：
-
-- `model_final.zip`
-- `train_config.json`
-- `evaluation.json`
-- `best_lengths.json`
-- `best_workspace_samples.npz`
-- `best_workspace.png`
-- `best_workspace.mp4`
-- `monitor.csv`
-
-其中：
-
-- `best_workspace_samples.npz` 保存最佳杆长对应的工作空间点云和采样角度
-- `best_workspace.png` 是静态预览图
-- `best_workspace.mp4` 是点云累积动画，直观展示 RL 训练后最佳机构的工作空间覆盖过程
 
 ## 开发与运行
 
@@ -251,10 +211,8 @@ source /opt/conda/etc/profile.d/conda.sh
 conda activate /openbayes/home/envs/bridge-robot-cloud
 ```
 
-## 当前状态
+测试命令：
 
-- 已完成：Phase 1 torque-based 最小物理环境闭环
-- 已完成：杆长分配单步 RL 环境
-- 已完成：受限角域 occupancy reward
-- 已完成：训练后自动导出 `.npz`、`.png`、`.mp4`
-- 当前主线：固定总长约束下的四杆长度分配优化
+```bash
+python -m pytest tests
+```

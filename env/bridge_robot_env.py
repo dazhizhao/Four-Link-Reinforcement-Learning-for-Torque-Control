@@ -47,14 +47,16 @@ class TaskConfig:
     home_pose: list[float]
     target_sampling: TargetSamplingConfig
     success_tolerance: float
+    success_hold_steps: int
 
 
 @dataclass(frozen=True)
 class RewardConfig:
     distance_weight: float
     torque_weight: float
-    power_weight: float
+    motion_weight: float
     smoothness_weight: float
+    hold_bonus_weight: float
     success_bonus: float
 
 
@@ -96,6 +98,7 @@ class EnvConfig:
                 home_pose=raw["task"]["home_pose"],
                 target_sampling=TargetSamplingConfig(**raw["task"]["target_sampling"]),
                 success_tolerance=raw["task"]["success_tolerance"],
+                success_hold_steps=raw["task"]["success_hold_steps"],
             ),
             reward=RewardConfig(**raw["reward"]),
             render=RenderConfig(**raw["render"]),
@@ -116,15 +119,19 @@ class RobotState:
     joint_power: np.ndarray
     step_count: int
     applied_action: np.ndarray
+    applied_action_norm: np.ndarray
     target_pos: np.ndarray
     distance_to_target: float
     gravity_torques: np.ndarray
     equivalent_inertia: np.ndarray
+    consecutive_success_steps: int
+    hold_progress: float
+    success_ready: bool
 
 
 @dataclass(frozen=True)
 class StepResult:
-    observation: dict[str, np.ndarray | float]
+    observation: dict[str, Any]
     reward: float
     terminated: bool
     truncated: bool
@@ -137,12 +144,12 @@ class BridgeRobotEnv:
         self.rng = np.random.default_rng()
         self.state: RobotState | None = None
         self.history: list[dict[str, Any]] = []
-        self.previous_action = np.zeros(4, dtype=float)
+        self.previous_action_norm = np.zeros(4, dtype=float)
         self._last_figure = None
 
     def reset(
         self, seed: int | None = None, target: Sequence[float] | None = None
-    ) -> dict[str, np.ndarray | float]:
+    ) -> dict[str, Any]:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
@@ -176,52 +183,23 @@ class BridgeRobotEnv:
             joint_power=np.zeros(4, dtype=float),
             step_count=0,
             applied_action=np.zeros(4, dtype=float),
+            applied_action_norm=np.zeros(4, dtype=float),
             target_pos=target_pos,
             distance_to_target=distance,
             gravity_torques=gravity_torques,
             equivalent_inertia=equivalent_inertia,
+            consecutive_success_steps=0,
+            hold_progress=0.0,
+            success_ready=False,
         )
         self.history = []
-        self.previous_action = np.zeros(4, dtype=float)
+        self.previous_action_norm = np.zeros(4, dtype=float)
         self._record_history(reward=0.0, terminated=False, truncated=False)
         return self._build_observation()
 
     def step(self, action: Sequence[float]) -> StepResult:
         if self.state is None:
             raise RuntimeError("Call reset() before step().")
-        if self.state.distance_to_target <= self.config.task.success_tolerance:
-            reward_breakdown = compute_reward(
-                distance_to_target=self.state.distance_to_target,
-                applied_action=np.zeros_like(self.previous_action),
-                joint_power=self.state.joint_power,
-                previous_action=self.previous_action,
-                success=True,
-                distance_weight=self.config.reward.distance_weight,
-                torque_weight=self.config.reward.torque_weight,
-                power_weight=self.config.reward.power_weight,
-                smoothness_weight=self.config.reward.smoothness_weight,
-                success_bonus=self.config.reward.success_bonus,
-            )
-            self._record_history(
-                reward=reward_breakdown.total,
-                terminated=True,
-                truncated=False,
-            )
-            return StepResult(
-                observation=self._build_observation(),
-                reward=reward_breakdown.total,
-                terminated=True,
-                truncated=False,
-                info={
-                    "reward_terms": reward_breakdown.to_dict(),
-                    "action_clipped": False,
-                    "success": True,
-                    "workspace_violation": False,
-                    "applied_action": np.zeros_like(self.previous_action),
-                    "gravity_torques": self.state.gravity_torques.copy(),
-                    "equivalent_inertia": self.state.equivalent_inertia.copy(),
-                },
-            )
 
         result = step_dynamics(
             joint_angles=self.state.q,
@@ -237,18 +215,33 @@ class BridgeRobotEnv:
             joint_limits=self.config.robot.joint_limits,
             prev_end_effector_vel=self.state.end_effector_vel,
         )
+        torque_limits = np.asarray(self.config.robot.torque_limits, dtype=float)
+        applied_action_norm = np.divide(
+            result.applied_action,
+            torque_limits,
+            out=np.zeros_like(result.applied_action),
+            where=torque_limits > 0.0,
+        )
         distance = float(np.linalg.norm(result.end_effector_pos - self.state.target_pos))
-        success = distance <= self.config.task.success_tolerance
+        success_ready = distance <= self.config.task.success_tolerance
+        consecutive_success_steps = self.state.consecutive_success_steps + 1 if success_ready else 0
+        hold_progress = min(
+            consecutive_success_steps / float(self.config.task.success_hold_steps),
+            1.0,
+        )
+        success = consecutive_success_steps >= self.config.task.success_hold_steps
         reward_breakdown = compute_reward(
             distance_to_target=distance,
-            applied_action=result.applied_action,
-            joint_power=result.joint_power,
-            previous_action=self.previous_action,
+            action_normalized=applied_action_norm,
+            joint_velocities=result.qd,
+            previous_action=self.previous_action_norm,
+            hold_progress=hold_progress if success_ready else 0.0,
             success=success,
             distance_weight=self.config.reward.distance_weight,
             torque_weight=self.config.reward.torque_weight,
-            power_weight=self.config.reward.power_weight,
+            motion_weight=self.config.reward.motion_weight,
             smoothness_weight=self.config.reward.smoothness_weight,
+            hold_bonus_weight=self.config.reward.hold_bonus_weight,
             success_bonus=self.config.reward.success_bonus,
         )
 
@@ -264,12 +257,16 @@ class BridgeRobotEnv:
             joint_power=result.joint_power,
             step_count=self.state.step_count + 1,
             applied_action=result.applied_action,
+            applied_action_norm=applied_action_norm,
             target_pos=self.state.target_pos,
             distance_to_target=distance,
             gravity_torques=result.gravity_torques,
             equivalent_inertia=result.equivalent_inertia,
+            consecutive_success_steps=consecutive_success_steps,
+            hold_progress=hold_progress,
+            success_ready=success_ready,
         )
-        self.previous_action = result.applied_action.copy()
+        self.previous_action_norm = applied_action_norm.copy()
 
         terminated = success
         truncated = self.state.step_count >= self.config.sim.max_steps
@@ -283,10 +280,14 @@ class BridgeRobotEnv:
             "reward_terms": reward_breakdown.to_dict(),
             "action_clipped": result.action_clipped,
             "success": success,
+            "success_ready": success_ready,
             "workspace_violation": bool(result.joint_limit_clipped),
             "applied_action": result.applied_action.copy(),
+            "applied_action_norm": applied_action_norm.copy(),
             "gravity_torques": result.gravity_torques.copy(),
             "equivalent_inertia": result.equivalent_inertia.copy(),
+            "consecutive_success_steps": consecutive_success_steps,
+            "hold_progress": hold_progress,
         }
         return StepResult(
             observation=self._build_observation(),
@@ -330,7 +331,7 @@ class BridgeRobotEnv:
                 return np.array([x, y], dtype=float)
         raise RuntimeError("Failed to sample a valid target position.")
 
-    def _build_observation(self) -> dict[str, np.ndarray | float]:
+    def _build_observation(self) -> dict[str, Any]:
         if self.state is None:
             raise RuntimeError("Environment is not initialized.")
         return {
@@ -343,6 +344,10 @@ class BridgeRobotEnv:
             "distance_to_target": float(self.state.distance_to_target),
             "joint_torques": self.state.joint_torques.copy(),
             "joint_power": self.state.joint_power.copy(),
+            "applied_action_norm": self.state.applied_action_norm.copy(),
+            "consecutive_success_steps": int(self.state.consecutive_success_steps),
+            "hold_progress": float(self.state.hold_progress),
+            "success_ready": bool(self.state.success_ready),
         }
 
     def _record_history(self, reward: float, terminated: bool, truncated: bool) -> None:
@@ -361,6 +366,10 @@ class BridgeRobotEnv:
                 "joint_torques": self.state.joint_torques.copy(),
                 "joint_power": self.state.joint_power.copy(),
                 "applied_action": self.state.applied_action.copy(),
+                "applied_action_norm": self.state.applied_action_norm.copy(),
+                "consecutive_success_steps": int(self.state.consecutive_success_steps),
+                "hold_progress": float(self.state.hold_progress),
+                "success_ready": bool(self.state.success_ready),
                 "reward": float(reward),
                 "terminated": bool(terminated),
                 "truncated": bool(truncated),
