@@ -1,0 +1,45 @@
+{
+  "sim": {
+    "dt": 0.02,
+    "max_steps": 250,
+    "gravity": 9.81,
+    "integrator": "semi_implicit_euler"
+  },
+  "robot": {
+    "link_lengths": [1.2, 1.0, 0.8, 0.6],
+    "link_masses": [8.0, 6.0, 4.0, 2.0],
+    "payload_mass": 1.5,
+    "joint_damping": [1.2, 1.0, 0.8, 0.6],
+    "joint_limits": [
+      [-3.1416, 3.1416],
+      [-3.1416, 3.1416],
+      [-3.1416, 3.1416],
+      [-3.1416, 3.1416]
+    ],
+    "torque_limits": [40.0, 30.0, 20.0, 10.0]
+  },
+  "task": {
+    "home_pose": [0.2, 0.4, 0.2, 0.0],
+    "target_sampling": {
+      "x": [0.8, 3.0],
+      "y": [-1.0, 2.0],
+      "radius": [0.4, 3.6]
+    },
+    "success_tolerance": 0.08
+  },
+  "reward": {
+    "distance_weight": 1.0,
+    "torque_weight": 0.01,
+    "power_weight": 0.005,
+    "smoothness_weight": 0.01,
+    "success_bonus": 10.0
+  },
+  "render": {
+    "figsize": [8.0, 8.0],
+    "dpi": 120,
+    "history_alpha": 0.8
+  },
+  "io": {
+    "output_dir": "/openbayes/home/results"
+  }
+}

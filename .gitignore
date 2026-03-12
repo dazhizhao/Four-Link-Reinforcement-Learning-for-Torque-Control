@@ -1,0 +1,6 @@
+.conda/
+.pytest_cache/
+__pycache__/
+results/
+*.mp4
+*.npz

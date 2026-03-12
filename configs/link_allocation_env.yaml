@@ -1,0 +1,6 @@
+{
+  "total_length": 3.6,
+  "default_link_lengths": [1.2, 1.0, 0.8, 0.6],
+  "min_link_lengths": [0.4, 0.4, 0.4, 0.4],
+  "max_link_lengths": [1.4, 1.4, 1.4, 1.4]
+}
