@@ -159,6 +159,7 @@ class BridgeRobotEnv:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
 
+        # `home_pose` and runtime `q` are relative serial-joint angles.
         q0 = np.asarray(self.config.task.home_pose, dtype=float)
         kin = forward_kinematics(q0, self.config.robot.link_lengths)
         if not is_pose_above_ground(kin.joint_positions, self.config.task.ground_y):

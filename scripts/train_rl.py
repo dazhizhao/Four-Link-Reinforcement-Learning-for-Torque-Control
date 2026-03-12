@@ -25,7 +25,7 @@ from env.bridge_robot_env import EnvConfig, RobotState
 from scripts.output_utils import build_run_dir, ensure_artifacts_dir
 from env.torque_control_env import TorqueControlEnv
 from scripts.run_env import save_rollout_npz
-from visualization.plots import save_training_curves
+from visualization.plots import save_joint_torque_subplots, save_training_curves
 from visualization.render import render_environment_state
 from visualization.video import export_rollout_video
 
@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Override deterministic evaluation episode count.",
+    )
+    parser.add_argument(
+        "--eval-freq",
+        type=int,
+        default=None,
+        help="Override periodic deterministic evaluation frequency in timesteps.",
     )
     return parser
 
@@ -173,28 +179,63 @@ def is_better_evaluation(candidate: dict[str, Any], incumbent: dict[str, Any] | 
 def build_periodic_eval_callback(
     base_callback_cls,
     *,
+    model_cls,
     eval_env: TorqueControlEnv,
+    env_config: EnvConfig,
     eval_episodes: int,
     base_seed: int,
     eval_freq: int,
     best_model_path: Path,
+    artifacts_dir: Path,
 ):
     class PeriodicEvalCallback(base_callback_cls):
         def __init__(self) -> None:
             super().__init__()
             self.best_evaluation: dict[str, Any] | None = None
             self._last_eval_timestep = 0
+            self.periodic_evaluations: list[dict[str, Any]] = []
 
         def _run_evaluation(self) -> None:
+            current_timestep = int(self.num_timesteps)
             evaluation = evaluate_policy(
                 self.model,
                 eval_env,
                 eval_episodes=eval_episodes,
                 base_seed=base_seed,
             )
+            best_updated = False
             if is_better_evaluation(evaluation, self.best_evaluation):
                 self.best_evaluation = copy.deepcopy(evaluation)
                 self.model.save(str(best_model_path))
+                best_updated = True
+
+            validation_model = self.model
+            loaded_best_model = None
+            if not best_updated:
+                loaded_best_model = model_cls.load(
+                    str(best_model_path),
+                    env=None,
+                    device=self.model.device,
+                )
+                validation_model = loaded_best_model
+
+            validation_evaluation = evaluate_policy(
+                validation_model,
+                eval_env,
+                eval_episodes=eval_episodes,
+                base_seed=base_seed,
+            )
+            eval_artifacts_dir = artifacts_dir / "evals" / f"step_{current_timestep:06d}"
+            summary_record = export_evaluation_snapshot(
+                artifacts_dir=eval_artifacts_dir,
+                env_config=env_config,
+                evaluation=validation_evaluation,
+                timestep=current_timestep,
+                best_updated=best_updated,
+            )
+            self.periodic_evaluations.append(summary_record)
+
+            del loaded_best_model
 
         def _on_step(self) -> bool:
             if eval_freq > 0 and (self.num_timesteps - self._last_eval_timestep) >= eval_freq:
@@ -266,10 +307,28 @@ def evaluate_policy(model, env: TorqueControlEnv, eval_episodes: int, base_seed:
     }
 
 
+def build_evaluation_metrics(evaluation: dict[str, Any]) -> dict[str, Any]:
+    best_episode = evaluation["best_episode"]
+    return {
+        "success_rate": float(evaluation["success_rate"]),
+        "mean_reward": float(evaluation["mean_reward"]),
+        "mean_final_distance": float(evaluation["mean_final_distance"]),
+        "mean_episode_length": float(evaluation["mean_episode_length"]),
+        "mean_torque_norm": float(evaluation["mean_torque_norm"]),
+        "mean_motion_penalty": float(evaluation["mean_motion_penalty"]),
+        "mean_smoothness_penalty": float(evaluation["mean_smoothness_penalty"]),
+        "episodes": int(evaluation["episodes"]),
+        "best_episode_seed": int(best_episode.seed),
+        "best_episode_reward": float(best_episode.reward),
+        "best_episode_success": bool(best_episode.success),
+    }
+
+
 def export_best_episode(
     artifacts_dir: Path,
     env_config: EnvConfig,
     best_episode: EpisodeSummary,
+    include_torque_plot: bool = False,
 ) -> dict[str, str]:
     history = best_episode.history
     final_state = best_episode.final_state
@@ -307,11 +366,43 @@ def export_best_episode(
         fps=15,
         ground_y=env_config.task.ground_y,
     )
+    torque_plot_path = None
+    if include_torque_plot:
+        torque_plot_path = save_joint_torque_subplots(
+            history=history,
+            output_path=artifacts_dir / "best_joint_torques.png",
+        )
     return {
         "best_rollout": str(rollout_path),
         "best_pose": str(pose_path),
         "rollout_video": str(video_path),
+        **({"joint_torque_plot": str(torque_plot_path)} if torque_plot_path is not None else {}),
     }
+
+
+def export_evaluation_snapshot(
+    *,
+    artifacts_dir: Path,
+    env_config: EnvConfig,
+    evaluation: dict[str, Any],
+    timestep: int,
+    best_updated: bool,
+) -> dict[str, Any]:
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    artifact_paths = export_best_episode(
+        artifacts_dir=artifacts_dir,
+        env_config=env_config,
+        best_episode=evaluation["best_episode"],
+    )
+    summary_record = {
+        "timestep": int(timestep),
+        "best_updated": bool(best_updated),
+        "artifact_dir": str(artifacts_dir),
+        "artifact_paths": artifact_paths,
+        **build_evaluation_metrics(evaluation),
+    }
+    ensure_json(artifacts_dir / "summary.json", summary_record)
+    return summary_record
 
 
 def main() -> None:
@@ -326,6 +417,7 @@ def main() -> None:
     seed = args.seed if args.seed is not None else train_config.seed
     run_name = args.run_name if args.run_name is not None else train_config.run_name
     eval_episodes = args.eval_episodes if args.eval_episodes is not None else train_config.eval_episodes
+    eval_freq = args.eval_freq if args.eval_freq is not None else train_config.eval_freq
     output_root = Path(args.output_dir if args.output_dir is not None else train_config.output_dir)
     run_dir, resolved_run_name = build_run_dir(output_root, "rl_torque_control", run_name)
     artifacts_dir = ensure_artifacts_dir(run_dir)
@@ -356,11 +448,14 @@ def main() -> None:
     best_model_path = run_dir / "best_model.zip"
     eval_callback = build_periodic_eval_callback(
         BaseCallback,
+        model_cls=SAC,
         eval_env=eval_env,
+        env_config=env_config,
         eval_episodes=eval_episodes,
         base_seed=seed + 1000,
-        eval_freq=train_config.eval_freq,
+        eval_freq=eval_freq,
         best_model_path=best_model_path,
+        artifacts_dir=artifacts_dir,
     )
     model.learn(
         total_timesteps=total_timesteps,
@@ -372,8 +467,6 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = run_dir / "model_final.zip"
-    model.save(str(model_path))
     training_curves_path = save_training_curves(
         output_path=artifacts_dir / "training_curves.png",
         monitor_csv_path=run_dir / "monitor.csv",
@@ -390,14 +483,21 @@ def main() -> None:
             evaluation = final_evaluation
             model.save(str(best_model_path))
 
+    best_model = SAC.load(str(best_model_path), env=None, device=model.device)
+    best_model_evaluation = evaluate_policy(
+        best_model,
+        eval_env,
+        eval_episodes=eval_episodes,
+        base_seed=seed + 1000,
+    )
     artifact_paths = export_best_episode(
         artifacts_dir=artifacts_dir,
         env_config=env_config,
-        best_episode=evaluation["best_episode"],
+        best_episode=best_model_evaluation["best_episode"],
+        include_torque_plot=True,
     )
     artifact_paths["training_curves"] = str(training_curves_path)
     artifact_paths["best_model"] = str(best_model_path)
-    artifact_paths["final_model"] = str(model_path)
     summary_payload = {
         "env_config": asdict(env_config),
         "train_config": asdict(train_config),
@@ -405,31 +505,24 @@ def main() -> None:
             "total_timesteps": total_timesteps,
             "seed": seed,
             "eval_episodes": eval_episodes,
+            "eval_freq": eval_freq,
             "run_name": run_name,
             "resolved_run_name": resolved_run_name,
             "run_dir": str(run_dir),
         },
         "evaluation": {
-            "success_rate": evaluation["success_rate"],
-            "mean_reward": evaluation["mean_reward"],
-            "mean_final_distance": evaluation["mean_final_distance"],
-            "mean_episode_length": evaluation["mean_episode_length"],
-            "mean_torque_norm": evaluation["mean_torque_norm"],
-            "mean_motion_penalty": evaluation["mean_motion_penalty"],
-            "mean_smoothness_penalty": evaluation["mean_smoothness_penalty"],
-            "episodes": evaluation["episodes"],
-            "best_episode_seed": evaluation["best_episode"].seed,
-            "best_episode_reward": evaluation["best_episode"].reward,
-            "best_episode_success": evaluation["best_episode"].success,
+            **build_evaluation_metrics(best_model_evaluation),
             "selection_policy": "success_rate_then_distance_then_reward",
+            "evaluation_source": "best_model.zip",
             "artifact_paths": artifact_paths,
         },
+        "periodic_evaluations": eval_callback.periodic_evaluations,
     }
     ensure_json(run_dir / "summary.json", summary_payload)
 
+    del best_model
     eval_env.close()
 
-    print(f"saved model to {model_path}")
     print(f"saved best model to {best_model_path}")
     print(f"saved summary to {run_dir / 'summary.json'}")
     print(f"saved artifacts to {artifacts_dir}")

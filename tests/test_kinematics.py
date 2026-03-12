@@ -18,8 +18,23 @@ def test_forward_kinematics_known_pose_positions():
             [0.0, 0.0],
             [1.0, 0.0],
             [1.0, 1.0],
-            [0.0, 1.0],
+            [1.0, 0.0],
             [0.0, 0.0],
+        ]
+    )
+    assert np.allclose(result.joint_positions, expected)
+
+
+def test_forward_kinematics_uses_relative_joint_angles():
+    result = forward_kinematics(
+        [np.pi / 4.0, -np.pi / 4.0],
+        [1.0, 1.0],
+    )
+    expected = np.array(
+        [
+            [0.0, 0.0],
+            [np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0],
+            [1.0 + np.sqrt(2.0) / 2.0, np.sqrt(2.0) / 2.0],
         ]
     )
     assert np.allclose(result.joint_positions, expected)

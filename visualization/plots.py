@@ -65,6 +65,37 @@ def plot_rollout_history(
     return fig
 
 
+def save_joint_torque_subplots(
+    history: list[dict[str, Any]],
+    output_path: str | Path,
+) -> Path:
+    if not history:
+        raise ValueError("history must contain at least one entry")
+
+    steps = np.array([item["step"] for item in history], dtype=int)
+    torques = np.array([item["joint_torques"] for item in history], dtype=float)
+    if torques.ndim != 2 or torques.shape[1] != 4:
+        raise ValueError("joint_torques must have shape (N, 4)")
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), dpi=120, sharex=True)
+    colors = ["#005f73", "#0a9396", "#ca6702", "#ae2012"]
+
+    for idx, ax in enumerate(axes.flatten()):
+        ax.plot(steps, torques[:, idx], color=colors[idx], linewidth=2)
+        ax.set_title(f"Joint {idx + 1} torque")
+        ax.set_xlabel("step")
+        ax.set_ylabel("torque (Nm)")
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle("Best-policy joint torques", fontsize=14)
+    fig.tight_layout()
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, bbox_inches="tight")
+    plt.close(fig)
+    return output
+
+
 def save_training_curves(
     output_path: str | Path,
     monitor_csv_path: str | Path,

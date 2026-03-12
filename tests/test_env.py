@@ -67,6 +67,13 @@ def test_reset_samples_target_above_ground():
     assert all(0.8 <= y <= 1.4 for y in ys)
 
 
+def test_reset_keeps_default_relative_home_pose_above_ground():
+    env = BridgeRobotEnv()
+    env.reset(seed=7)
+
+    assert np.all(env.state.joint_positions[:, 1] >= env.config.task.ground_y)
+
+
 def test_reset_rejects_target_on_or_below_ground():
     env = BridgeRobotEnv()
 

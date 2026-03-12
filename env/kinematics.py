@@ -14,6 +14,13 @@ class KinematicsResult:
     end_effector_pos: np.ndarray
 
 
+def cumulative_joint_angles(joint_angles: Sequence[float]) -> np.ndarray:
+    q = np.asarray(joint_angles, dtype=float)
+    if q.ndim != 1:
+        raise ValueError("joint_angles must be a 1D sequence")
+    return np.cumsum(q)
+
+
 def forward_kinematics(
     joint_angles: Sequence[float], link_lengths: Sequence[float]
 ) -> KinematicsResult:
@@ -23,8 +30,9 @@ def forward_kinematics(
     if q.shape != lengths.shape:
         raise ValueError("joint_angles and link_lengths must have the same shape")
 
+    world_angles = cumulative_joint_angles(q)
     joint_positions = np.zeros((len(lengths) + 1, 2), dtype=float)
-    for idx, (theta, length) in enumerate(zip(q, lengths)):
+    for idx, (theta, length) in enumerate(zip(world_angles, lengths)):
         direction = np.array([math.cos(theta), math.sin(theta)], dtype=float)
         joint_positions[idx + 1] = joint_positions[idx] + length * direction
 

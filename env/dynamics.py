@@ -143,6 +143,12 @@ def step_dynamics(
         payload_mass=payload_mass,
         gravity=gravity,
     )
+    equivalent_inertia_next = compute_equivalent_inertia(
+        joint_angles=q_next,
+        link_lengths=link_lengths,
+        link_masses=link_masses,
+        payload_mass=payload_mass,
+    )
     joint_power = gravity_torques_next * qd_next
 
     return DynamicsResult(
@@ -158,7 +164,7 @@ def step_dynamics(
         joint_power=joint_power,
         applied_action=tau_applied,
         gravity_torques=gravity_torques_next,
-        equivalent_inertia=equivalent_inertia,
+        equivalent_inertia=equivalent_inertia_next,
         action_clipped=action_clipped,
         joint_limit_clipped=joint_limit_clipped,
     )

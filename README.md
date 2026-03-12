@@ -80,7 +80,6 @@ python scripts/train_rl.py \
 至少包含：
 
 - `best_model.zip`
-- `model_final.zip`
 - `progress.csv`
 - `summary.json`
 - `monitor.csv`
@@ -88,6 +87,12 @@ python scripts/train_rl.py \
 - `artifacts/best_rollout.npz`
 - `artifacts/best_pose.png`
 - `artifacts/best_rollout.mp4`
+- `artifacts/best_joint_torques.png`
+
+补充说明：
+- `train_rl.py` 训练结束后不再保存 `model_final.zip`，只保留 `best_model.zip`。
+- 训练结束时会重新加载 `best_model.zip` 做最终验证。
+- 最终验证除轨迹视频外，还会额外导出 `artifacts/best_joint_torques.png`，用一个 2x2 大图展示 4 个关节力矩随 step 的变化。
 
 每次 run 会自动附加时间戳和短随机后缀，避免同名实验互相覆盖。
 
@@ -101,10 +106,14 @@ python scripts/train_rl.py \
 - `mean_motion_penalty`
 - `mean_smoothness_penalty`
 
-训练期间会按固定 `eval_freq` 做 deterministic evaluation，并按 `success_rate -> mean_final_distance -> mean_reward` 的顺序保存 `best_model.zip`。最佳回合优先从成功回合中选择；若评估时没有成功回合，则退化为总回报最高回合。其余可视化和回放文件统一放在 `artifacts/` 子目录，避免根目录堆太多文件。
+训练期间会按固定 `eval_freq` 做 deterministic evaluation，并按 `success_rate -> mean_final_distance -> mean_reward` 的顺序保存 `best_model.zip`。每次周期评估还会把当前全局 best policy 的验证产物保存到 `artifacts/evals/step_<timestep>/`，其中包含 `summary.json`、`best_rollout.npz`、`best_pose.png` 和 `best_rollout.mp4`。最佳回合优先从成功回合中选择；若评估时没有成功回合，则退化为总回报最高回合。其余可视化和回放文件统一放在 `artifacts/` 子目录，避免根目录堆太多文件。
 
 训练期间控制台输出已精简为少量开始/结束信息。更完整的训练过程曲线会保存到 `artifacts/training_curves.png`，其中会尽量展示 episode reward、episode length 以及 SB3 记录到 `progress.csv` 中的 actor/critic loss 等常见 RL 指标。
-训练结束时也会明确打印 torque rollout 视频路径；同一路径也会写入 `summary.json -> evaluation -> artifact_paths -> rollout_video`。
+训练结束时也会明确打印 torque rollout 视频路径；同一轮最终 best 权重验证生成的 `rollout_video` 和 `joint_torque_plot` 路径都会写入 `summary.json -> evaluation -> artifact_paths`。
+
+当前实现说明：
+- 周期评估仍会把阶段性 best policy 验证结果保存到 `artifacts/evals/step_<timestep>/`。
+- `summary.json -> evaluation -> artifact_paths` 现在会记录 `joint_torque_plot`，对应最终 best 权重验证得到的四力矩子图。
 
 ## 物理环境与可视化
 
