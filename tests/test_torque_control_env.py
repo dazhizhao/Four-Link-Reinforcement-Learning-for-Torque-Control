@@ -22,6 +22,7 @@ def make_env() -> TorqueControlEnv:
         task=TaskConfig(
             home_pose=base_env.config.task.home_pose,
             target_sampling=base_env.config.task.target_sampling,
+            ground_y=base_env.config.task.ground_y,
             success_tolerance=base_env.config.task.success_tolerance,
             success_hold_steps=base_env.config.task.success_hold_steps,
         ),

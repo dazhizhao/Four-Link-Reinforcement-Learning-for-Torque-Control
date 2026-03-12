@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover - exercised only without PyYAML
     yaml = None
 
 from .dynamics import compute_equivalent_inertia, compute_gravity_torques, step_dynamics
-from .kinematics import forward_kinematics, total_reach
+from .kinematics import forward_kinematics, is_pose_above_ground, total_reach
 from .reward import compute_reward
 
 
@@ -46,6 +46,7 @@ class TargetSamplingConfig:
 class TaskConfig:
     home_pose: list[float]
     target_sampling: TargetSamplingConfig
+    ground_y: float
     success_tolerance: float
     success_hold_steps: int
 
@@ -97,6 +98,7 @@ class EnvConfig:
             task=TaskConfig(
                 home_pose=raw["task"]["home_pose"],
                 target_sampling=TargetSamplingConfig(**raw["task"]["target_sampling"]),
+                ground_y=raw["task"]["ground_y"],
                 success_tolerance=raw["task"]["success_tolerance"],
                 success_hold_steps=raw["task"]["success_hold_steps"],
             ),
@@ -155,7 +157,14 @@ class BridgeRobotEnv:
 
         q0 = np.asarray(self.config.task.home_pose, dtype=float)
         kin = forward_kinematics(q0, self.config.robot.link_lengths)
-        target_pos = np.asarray(target, dtype=float) if target is not None else self._sample_target()
+        if not is_pose_above_ground(kin.joint_positions, self.config.task.ground_y):
+            raise ValueError("home_pose places the robot below the ground boundary.")
+
+        target_pos = (
+            self._validate_target(target)
+            if target is not None
+            else self._sample_target()
+        )
         distance = float(np.linalg.norm(kin.end_effector_pos - target_pos))
         gravity_torques = compute_gravity_torques(
             joint_angles=q0,
@@ -223,6 +232,37 @@ class BridgeRobotEnv:
             where=torque_limits > 0.0,
         )
         distance = float(np.linalg.norm(result.end_effector_pos - self.state.target_pos))
+        ground_contact = not is_pose_above_ground(
+            result.joint_positions,
+            self.config.task.ground_y,
+        )
+        if ground_contact:
+            previous_state = self.state
+            distance = float(np.linalg.norm(previous_state.end_effector_pos - previous_state.target_pos))
+            result_joint_torques = previous_state.gravity_torques.copy()
+            result_gravity_torques = previous_state.gravity_torques.copy()
+            result_equivalent_inertia = previous_state.equivalent_inertia.copy()
+            result_q = previous_state.q.copy()
+            result_joint_positions = previous_state.joint_positions.copy()
+            result_end_effector_pos = previous_state.end_effector_pos.copy()
+            result_qd = np.zeros_like(previous_state.qd)
+            result_qdd = np.zeros_like(previous_state.qdd)
+            result_end_effector_vel = np.zeros_like(previous_state.end_effector_vel)
+            result_end_effector_acc = np.zeros_like(previous_state.end_effector_acc)
+            result_joint_power = np.zeros_like(previous_state.joint_power)
+        else:
+            result_joint_torques = result.joint_torques
+            result_gravity_torques = result.gravity_torques
+            result_equivalent_inertia = result.equivalent_inertia
+            result_q = result.q
+            result_joint_positions = result.joint_positions
+            result_end_effector_pos = result.end_effector_pos
+            result_qd = result.qd
+            result_qdd = result.qdd
+            result_end_effector_vel = result.end_effector_vel
+            result_end_effector_acc = result.end_effector_acc
+            result_joint_power = result.joint_power
+
         success_ready = distance <= self.config.task.success_tolerance
         consecutive_success_steps = self.state.consecutive_success_steps + 1 if success_ready else 0
         hold_progress = min(
@@ -246,22 +286,22 @@ class BridgeRobotEnv:
         )
 
         self.state = RobotState(
-            q=result.q,
-            qd=result.qd,
-            qdd=result.qdd,
-            joint_positions=result.joint_positions,
-            end_effector_pos=result.end_effector_pos,
-            end_effector_vel=result.end_effector_vel,
-            end_effector_acc=result.end_effector_acc,
-            joint_torques=result.joint_torques,
-            joint_power=result.joint_power,
+            q=result_q,
+            qd=result_qd,
+            qdd=result_qdd,
+            joint_positions=result_joint_positions,
+            end_effector_pos=result_end_effector_pos,
+            end_effector_vel=result_end_effector_vel,
+            end_effector_acc=result_end_effector_acc,
+            joint_torques=result_joint_torques,
+            joint_power=result_joint_power,
             step_count=self.state.step_count + 1,
             applied_action=result.applied_action,
             applied_action_norm=applied_action_norm,
             target_pos=self.state.target_pos,
             distance_to_target=distance,
-            gravity_torques=result.gravity_torques,
-            equivalent_inertia=result.equivalent_inertia,
+            gravity_torques=result_gravity_torques,
+            equivalent_inertia=result_equivalent_inertia,
             consecutive_success_steps=consecutive_success_steps,
             hold_progress=hold_progress,
             success_ready=success_ready,
@@ -281,11 +321,13 @@ class BridgeRobotEnv:
             "action_clipped": result.action_clipped,
             "success": success,
             "success_ready": success_ready,
-            "workspace_violation": bool(result.joint_limit_clipped),
+            "ground_contact": ground_contact,
+            "joint_limit_violation": bool(result.joint_limit_clipped),
+            "workspace_violation": bool(result.joint_limit_clipped or ground_contact),
             "applied_action": result.applied_action.copy(),
             "applied_action_norm": applied_action_norm.copy(),
-            "gravity_torques": result.gravity_torques.copy(),
-            "equivalent_inertia": result.equivalent_inertia.copy(),
+            "gravity_torques": result_gravity_torques.copy(),
+            "equivalent_inertia": result_equivalent_inertia.copy(),
             "consecutive_success_steps": consecutive_success_steps,
             "hold_progress": hold_progress,
         }
@@ -307,6 +349,7 @@ class BridgeRobotEnv:
             state=self.state,
             history=self.history,
             config=self.config.render,
+            ground_y=self.config.task.ground_y,
             save_path=save_path,
             show=show,
         )
@@ -326,10 +369,20 @@ class BridgeRobotEnv:
         for _ in range(1024):
             x = self.rng.uniform(sampling.x[0], sampling.x[1])
             y = self.rng.uniform(sampling.y[0], sampling.y[1])
+            if y <= self.config.task.ground_y:
+                continue
             radius = float(np.hypot(x, y))
             if radius_min <= radius <= radius_max:
                 return np.array([x, y], dtype=float)
         raise RuntimeError("Failed to sample a valid target position.")
+
+    def _validate_target(self, target: Sequence[float]) -> np.ndarray:
+        target_pos = np.asarray(target, dtype=float)
+        if target_pos.shape != (2,):
+            raise ValueError("target must be a 2D position.")
+        if target_pos[1] <= self.config.task.ground_y:
+            raise ValueError("target must satisfy y > ground_y.")
+        return target_pos
 
     def _build_observation(self) -> dict[str, Any]:
         if self.state is None:

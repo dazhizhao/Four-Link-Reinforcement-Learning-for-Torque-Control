@@ -16,6 +16,7 @@ def export_rollout_video(
     target_pos: Sequence[float],
     output_path: str | Path,
     fps: int,
+    ground_y: float = 0.0,
 ) -> Path:
     if not history:
         raise ValueError("history must contain at least one entry")
@@ -26,9 +27,15 @@ def export_rollout_video(
 
     trajectory = np.array([frame["end_effector_pos"] for frame in history], dtype=float)
     max_frame_radius = 0.0
+    y_min = float(np.min(trajectory[:, 1]))
+    y_max = float(np.max(trajectory[:, 1]))
     for frame in history:
         kin = forward_kinematics(frame["q"], link_lengths)
         max_frame_radius = max(max_frame_radius, float(np.max(np.abs(kin.joint_positions))))
+        y_min = min(y_min, float(np.min(kin.joint_positions[:, 1])))
+        y_max = max(y_max, float(np.max(kin.joint_positions[:, 1])))
+    y_min = min(y_min, float(target[1]))
+    y_max = max(y_max, float(target[1]))
     max_radius = max(max_frame_radius, float(np.linalg.norm(target))) + 0.5
 
     with imageio.get_writer(output, fps=fps, codec="libx264", format="FFMPEG", pixelformat="yuv420p") as writer:
@@ -73,9 +80,10 @@ def export_rollout_video(
                 alpha=0.85,
                 label="trajectory",
             )
+            ax.axhline(ground_y, color="#bb3e03", linestyle="--", linewidth=2, alpha=0.9, label="ground")
 
             ax.set_xlim(-max_radius, max_radius)
-            ax.set_ylim(-max_radius, max_radius)
+            ax.set_ylim(min(ground_y - 0.25, y_min - 0.25), max(y_max + 0.5, ground_y + 0.5))
             ax.set_aspect("equal", adjustable="box")
             ax.grid(True, alpha=0.3)
             ax.set_xlabel("x (m)")

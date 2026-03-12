@@ -38,3 +38,13 @@ def forward_kinematics(
 
 def total_reach(link_lengths: Sequence[float]) -> float:
     return float(np.sum(np.asarray(link_lengths, dtype=float)))
+
+
+def is_pose_above_ground(
+    joint_positions: Sequence[Sequence[float]] | np.ndarray,
+    ground_y: float = 0.0,
+) -> bool:
+    positions = np.asarray(joint_positions, dtype=float)
+    if positions.ndim != 2 or positions.shape[1] != 2:
+        raise ValueError("joint_positions must have shape (N, 2)")
+    return bool(np.all(positions[:, 1] >= float(ground_y)))

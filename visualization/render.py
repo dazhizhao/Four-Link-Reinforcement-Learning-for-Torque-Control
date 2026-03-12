@@ -11,6 +11,7 @@ def render_environment_state(
     state: Any,
     history: list[dict[str, Any]],
     config: Any,
+    ground_y: float = 0.0,
     save_path: str | Path | None = None,
     show: bool = False,
 ):
@@ -49,12 +50,19 @@ def render_environment_state(
             label="trajectory",
         )
 
+    ax.axhline(ground_y, color="#bb3e03", linestyle="--", linewidth=2, alpha=0.9, label="ground")
+
+    y_values = [joints[:, 1], np.asarray([state.target_pos[1]], dtype=float)]
+    if history:
+        y_values.append(trajectory[:, 1])
+    y_min = min(float(np.min(values)) for values in y_values)
+    y_max = max(float(np.max(values)) for values in y_values)
     max_radius = max(
         float(np.max(np.abs(joints))) + 0.5,
         float(np.linalg.norm(state.target_pos)) + 0.5,
     )
     ax.set_xlim(-max_radius, max_radius)
-    ax.set_ylim(-max_radius, max_radius)
+    ax.set_ylim(min(ground_y - 0.25, y_min - 0.25), max(y_max + 0.5, ground_y + 0.5))
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
     ax.set_xlabel("x (m)")

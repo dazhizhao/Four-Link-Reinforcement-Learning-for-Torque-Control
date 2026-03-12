@@ -22,9 +22,10 @@
     "home_pose": [0.2, 0.4, 0.2, 0.0],
     "target_sampling": {
       "x": [0.8, 3.0],
-      "y": [-1.0, 2.0],
+      "y": [0.8, 2.0],
       "radius": [0.4, 3.6]
     },
+    "ground_y": 0.0,
     "success_tolerance": 0.08,
     "success_hold_steps": 10
   },

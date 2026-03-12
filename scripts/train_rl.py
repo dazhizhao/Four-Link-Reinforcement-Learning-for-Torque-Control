@@ -241,6 +241,7 @@ def export_best_episode(
         state=final_state,
         history=history,
         config=env_config.render,
+        ground_y=env_config.task.ground_y,
         save_path=pose_path,
         show=False,
     )
@@ -251,6 +252,7 @@ def export_best_episode(
         target_pos=final_state.target_pos,
         output_path=artifacts_dir / "best_rollout.mp4",
         fps=15,
+        ground_y=env_config.task.ground_y,
     )
     return {
         "best_rollout": str(rollout_path),

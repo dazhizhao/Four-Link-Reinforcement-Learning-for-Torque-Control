@@ -62,6 +62,7 @@ def main() -> None:
         target_pos=env.state.target_pos,
         output_path=video_path,
         fps=VIDEO_FPS,
+        ground_y=config.task.ground_y,
     )
 
     print(f"saved pose figure to {pose_path}")
